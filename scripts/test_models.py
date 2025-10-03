@@ -29,12 +29,12 @@ class ModelTester:
     def load_models(self):
         """Load trained models"""
         print("="*80)
-        print("LOADING TRAINED MODELS")
+        print("LOADING TRAINED MODELS (FIXED - NO DATA LEAKAGE)")
         print("="*80)
 
         # Load Random Forest models
         for dataset in ['cumulative', 'k2pandc', 'toi']:
-            model_path = f'models/{dataset}_rf.pkl'
+            model_path = f'models_fixed/{dataset}_rf.pkl'
             try:
                 with open(model_path, 'rb') as f:
                     self.models[dataset] = pickle.load(f)
@@ -44,7 +44,7 @@ class ModelTester:
 
         # Load label encoders
         try:
-            with open('models/label_encoders.pkl', 'rb') as f:
+            with open('models_fixed/label_encoders.pkl', 'rb') as f:
                 self.label_encoders = pickle.load(f)
             print(f"✓ Loaded: label_encoders.pkl")
         except Exception as e:
@@ -59,17 +59,24 @@ class ModelTester:
         # Load cleaned data
         df = pd.read_csv(f'data/processed/{dataset_name}_cleaned.csv')
 
-        # Define target column
+        # Define target column and leakage columns
         if dataset_name == 'cumulative':
             target_col = 'koi_disposition'
+            leakage_cols = ['koi_disposition', 'koi_disposition_encoded',
+                           'koi_pdisposition', 'koi_pdisposition_encoded']
         elif dataset_name == 'k2pandc':
             target_col = 'disposition'
+            leakage_cols = ['disposition', 'disposition_encoded',
+                           'discoverymethod', 'discoverymethod_encoded']
         else:
             target_col = 'tfopwg_disp'
+            leakage_cols = ['tfopwg_disp', 'tfopwg_disp_encoded']
 
-        # Separate features and target
-        X = df.drop(columns=[target_col])
-        y = df[target_col]
+        # Get target
+        y = df[target_col].copy()
+
+        # Remove ALL target and leakage columns
+        X = df.drop(columns=[col for col in leakage_cols if col in df.columns])
 
         # Keep only numeric features
         X = X.select_dtypes(include=[np.number])
