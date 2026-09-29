@@ -23,6 +23,8 @@ from sklearn.metrics import (
     f1_score, confusion_matrix, classification_report
 )
 from sklearn.preprocessing import LabelEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.base import clone
 
 # Optional imports with error handling
 try:
@@ -39,6 +41,7 @@ except ImportError:
 
 try:
     from imblearn.over_sampling import SMOTE
+    from imblearn.pipeline import Pipeline as ImbPipeline
     HAS_SMOTE = True
 except ImportError:
     HAS_SMOTE = False
@@ -205,54 +208,56 @@ class ExoplanetMLPipeline:
 
         return X_train, X_val, X_test, y_train, y_val, y_test
 
-    def handle_imbalance(
-        self,
-        X_train: pd.DataFrame,
-        y_train: np.ndarray
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
+    def make_sampler(self, y_train: np.ndarray) -> Optional[Any]:
         """
-        Handle class imbalance using SMOTE if available.
+        Create a SMOTE sampler for class imbalance, if needed and available.
 
         Args:
-            X_train: Training features
             y_train: Training target
 
         Returns:
-            Tuple of (resampled_X, resampled_y)
+            A SMOTE instance, or None when no resampling should be done
         """
         if not config.IMBALANCE["USE_SMOTE"] or not HAS_SMOTE:
             if not HAS_SMOTE:
                 logger.warning("SMOTE not available. Install imbalanced-learn for class balancing.")
-            return X_train, y_train
+            return None
 
         # Check class distribution
         unique, counts = np.unique(y_train, return_counts=True)
         imbalance_ratio = counts.max() / counts.min()
 
         if imbalance_ratio > 3:
-            logger.info(f"Class imbalance detected (ratio: {imbalance_ratio:.1f}). Applying SMOTE...")
-
-            try:
-                smote = SMOTE(
-                    random_state=config.IMBALANCE["SMOTE_RANDOM_STATE"],
-                    k_neighbors=min(
-                        config.IMBALANCE["SMOTE_K_NEIGHBORS"],
-                        counts.min() - 1  # Can't have more neighbors than samples
-                    )
+            logger.info(f"Class imbalance detected (ratio: {imbalance_ratio:.1f}). Using SMOTE on training folds...")
+            return SMOTE(
+                random_state=config.IMBALANCE["SMOTE_RANDOM_STATE"],
+                k_neighbors=min(
+                    config.IMBALANCE["SMOTE_K_NEIGHBORS"],
+                    counts.min() - 1  # Can't have more neighbors than samples
                 )
-                X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+            )
 
-                logger.info(f"  Before SMOTE: {len(y_train)} samples")
-                logger.info(f"  After SMOTE:  {len(y_resampled)} samples")
+        logger.info("Classes relatively balanced. Skipping SMOTE.")
+        return None
 
-                return pd.DataFrame(X_resampled, columns=X_train.columns), y_resampled
+    def build_pipeline(self, model: Any, y_train: np.ndarray) -> Any:
+        """
+        Wrap a model in a pipeline that applies SMOTE only when fitting.
 
-            except Exception as e:
-                logger.warning(f"SMOTE failed: {str(e)}. Proceeding without resampling.")
-                return X_train, y_train
-        else:
-            logger.info("Classes relatively balanced. Skipping SMOTE.")
-            return X_train, y_train
+        Because resampling is a pipeline step, cross-validation and grid
+        search oversample the training folds only, never the scored fold.
+
+        Args:
+            model: Unfitted classifier
+            y_train: Target the pipeline will be fitted on
+
+        Returns:
+            Pipeline with an optional 'smote' step and a 'model' step
+        """
+        sampler = self.make_sampler(y_train)
+        if sampler is None:
+            return Pipeline([('model', model)])
+        return ImbPipeline([('smote', sampler), ('model', model)])
 
     def cross_validate_model(
         self,
@@ -346,10 +351,10 @@ class ExoplanetMLPipeline:
                 base_model.set_params(**config.HYPERPARAMETERS[model_type])
                 return base_model, {}
 
-            # Grid search
+            # Grid search (SMOTE runs inside each training fold)
             grid_search = GridSearchCV(
-                base_model,
-                param_grid,
+                self.build_pipeline(base_model, y_train),
+                {f'model__{name}': values for name, values in param_grid.items()},
                 cv=3,  # Reduced CV for speed
                 scoring='accuracy',
                 n_jobs=-1,
@@ -362,7 +367,10 @@ class ExoplanetMLPipeline:
             logger.info(f"  ✓ Best parameters: {grid_search.best_params_}")
             logger.info(f"  ✓ Best CV score: {grid_search.best_score_*100:.2f}%")
 
-            return grid_search.best_estimator_, grid_search.best_params_
+            best_params = {
+                name[len('model__'):]: value for name, value in grid_search.best_params_.items()
+            }
+            return clone(grid_search.best_estimator_.named_steps['model']), best_params
 
         except Exception as e:
             logger.error(f"Hyperparameter tuning failed: {str(e)}")
@@ -427,9 +435,11 @@ class ExoplanetMLPipeline:
                 else:
                     raise ValueError(f"Model type {model_type} not available")
 
-            # Train
+            # Train (SMOTE, if needed, is applied to the training data by the pipeline)
             logger.info("Training model...")
-            model.fit(X_train, y_train)
+            pipeline = self.build_pipeline(clone(model), y_train)
+            pipeline.fit(X_train, y_train)
+            model = pipeline.named_steps['model']
 
             # Predictions
             y_train_pred = model.predict(X_train)
@@ -459,11 +469,12 @@ class ExoplanetMLPipeline:
             model_key = f'{dataset_name}_{model_type}'
             self.models[model_key] = model
 
-            # Cross-validation
+            # Cross-validation on real rows only; SMOTE runs inside each training fold
+            y_train_val = np.concatenate([y_train, y_val])
             cv_results = self.cross_validate_model(
-                model,
+                self.build_pipeline(clone(model), y_train_val),
                 pd.concat([X_train, X_val]),
-                np.concatenate([y_train, y_val]),
+                y_train_val,
                 model_type
             )
 
@@ -580,9 +591,6 @@ class ExoplanetMLPipeline:
             X_train, X_val, X_test, y_train, y_val, y_test = self.create_splits(X, y_encoded)
             self.test_indices[dataset_name] = X_test.index.tolist()
 
-            # Handle imbalance
-            X_train_balanced, y_train_balanced = self.handle_imbalance(X_train, y_train)
-
             # Train each model type
             dataset_results = {}
             for model_type in model_types:
@@ -590,8 +598,8 @@ class ExoplanetMLPipeline:
                     # Train
                     train_results = self.train_model(
                         model_type,
-                        X_train_balanced,
-                        y_train_balanced,
+                        X_train,
+                        y_train,
                         X_val,
                         y_val,
                         dataset_name,
