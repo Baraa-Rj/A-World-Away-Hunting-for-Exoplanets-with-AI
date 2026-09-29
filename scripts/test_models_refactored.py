@@ -46,6 +46,7 @@ class ModelTester:
         self.models: Dict[str, Any] = {}
         self.label_encoders: Dict[str, LabelEncoder] = {}
         self.results: Dict[str, Dict[str, float]] = {}
+        self.missing: List[str] = []
 
     def load_models(
         self,
@@ -55,14 +56,14 @@ class ModelTester:
         Load trained models from disk.
 
         Args:
-            model_types: List of model types to load (default: ['rf'])
+            model_types: List of model types to load (default: config.MODEL_TYPES)
         """
         logger.info("="*80)
         logger.info("LOADING TRAINED MODELS")
         logger.info("="*80)
 
         if model_types is None:
-            model_types = ['rf']
+            model_types = config.MODEL_TYPES
 
         for dataset in ['cumulative', 'k2pandc', 'toi']:
             for model_type in model_types:
@@ -70,7 +71,8 @@ class ModelTester:
                     model_path = config.get_model_file_path(dataset, model_type)
 
                     if not Path(model_path).exists():
-                        logger.warning(f"Model not found: {model_path}")
+                        logger.error(f"Model not found: {model_path}")
+                        self.missing.append(model_path)
                         continue
 
                     with open(model_path, 'rb') as f:
@@ -88,6 +90,7 @@ class ModelTester:
             logger.info(f"✓ Loaded: label_encoders.pkl")
         except Exception as e:
             logger.error(f"✗ Error loading label encoders: {e}")
+            self.missing.append(str(encoder_path))
 
     def load_and_prepare_data(
         self,
@@ -348,19 +351,22 @@ class ModelTester:
         logger.info("\n" + "="*80)
 
 
-def main(model_types: Optional[List[str]] = None):
+def main(model_types: Optional[List[str]] = None) -> int:
     """
     Main testing pipeline.
 
     Args:
-        model_types: List of model types to test (default: ['rf'])
+        model_types: List of model types to test (default: config.MODEL_TYPES)
+
+    Returns:
+        Process exit code: 0 if every model was found and evaluated, 1 otherwise
     """
     logger.info("="*80)
     logger.info("NASA EXOPLANET MODEL TESTING & EVALUATION")
     logger.info("="*80)
 
     if model_types is None:
-        model_types = ['rf']
+        model_types = config.MODEL_TYPES
 
     tester = ModelTester()
 
@@ -377,9 +383,21 @@ def main(model_types: Optional[List[str]] = None):
     # Generate summary
     tester.generate_summary_report()
 
+    expected = len(model_types) * len(['cumulative', 'k2pandc', 'toi'])
+    if tester.missing:
+        logger.error(
+            f"\n❌ Missing {len(tester.missing)} trained model file(s). "
+            f"Run scripts/train_models_refactored.py first."
+        )
+        return 1
+    if len(tester.results) < expected:
+        logger.error(f"\n❌ Only {len(tester.results)} of {expected} models were evaluated.")
+        return 1
+
     logger.info("\n✅ TESTING COMPLETE!")
     logger.info("="*80)
+    return 0
 
 
 if __name__ == "__main__":
-    main(model_types=['rf'])
+    sys.exit(main())

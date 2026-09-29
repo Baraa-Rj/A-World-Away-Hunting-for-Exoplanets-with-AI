@@ -711,7 +711,8 @@ class ExoplanetMLPipeline:
 
             # Save each model
             for name, model in self.models.items():
-                filepath = config.MODELS_FIXED_DIR / f'{name}.pkl'
+                dataset_name, model_type = name.split('_', 1)
+                filepath = config.get_model_file_path(dataset_name, model_type)
                 with open(filepath, 'wb') as f:
                     pickle.dump(model, f)
                 logger.info(f"  ✓ Saved: {filepath}")
