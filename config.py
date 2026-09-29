@@ -151,6 +151,9 @@ TARGET_COLUMNS = {
     ],
     "k2pandc": [
         "disposition", "disposition_encoded", "pl_controv_flag",
+        # 3022 of 3030 rows are Transit; the 8 Radial Velocity rows are all
+        # CONFIRMED because the archive records them only once confirmed.
+        "discoverymethod_encoded",
     ],
     "toi": [
         "tfopwg_disp", "tfopwg_disp_encoded", "toi_disposition",

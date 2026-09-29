@@ -63,3 +63,8 @@ Thumbs.db
 *.tmp
 temp/
 tmp/
+
+# Per-model plots written by scripts/test_models_refactored.py
+data/processed/*_random_forest_*.png
+data/processed/*_xgboost_*.png
+data/processed/*_lightgbm_*.png
