@@ -20,6 +20,7 @@ from sklearn.preprocessing import LabelEncoder
 # Add parent directory to path to import config
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
+from features import prepare_features
 
 # Setup logging
 logging.basicConfig(
@@ -114,21 +115,8 @@ class ModelTester:
             file_path = config.get_cleaned_file_path(dataset_name)
             df = pd.read_csv(file_path)
 
-            # Get dataset config
-            dataset_config = config.get_dataset_config(dataset_name)
-            target_col = dataset_config["target_column"]
-
-            # Get target
-            y = df[target_col].copy()
-
-            # Get leakage columns
-            leakage_cols = config.TARGET_COLUMNS[dataset_name]
-
-            # Remove target and leakage columns
-            X = df.drop(columns=[col for col in leakage_cols if col in df.columns])
-
-            # Keep only numeric features
-            X = X.select_dtypes(include=[np.number])
+            # Same feature preparation as training
+            X, y = prepare_features(df, dataset_name)
 
             # Encode target
             le = self.label_encoders[dataset_name]

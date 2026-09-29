@@ -21,3 +21,18 @@ def test_no_target_derived_column_in_features(dataset):
     df = pd.read_csv(config.get_cleaned_file_path(dataset))
     X, _, _ = ExoplanetMLPipeline().prepare_data(df, dataset)
     assert not TARGET_DERIVED & set(X.columns)
+
+
+@pytest.mark.parametrize("dataset", DATASETS)
+def test_training_and_evaluation_prepare_identical_features(dataset):
+    from test_models_refactored import ModelTester
+
+    df = pd.read_csv(config.get_cleaned_file_path(dataset))
+    pipeline = ExoplanetMLPipeline()
+    X_train_side, _, _ = pipeline.prepare_data(df, dataset)
+
+    tester = ModelTester()
+    tester.label_encoders = pipeline.label_encoders
+    X_eval_side, _, _, _ = tester.load_and_prepare_data(dataset)
+
+    pd.testing.assert_frame_equal(X_train_side, X_eval_side)
