@@ -80,6 +80,7 @@ class ExoplanetMLPipeline:
         self.models: Dict[str, Any] = {}
         self.label_encoders: Dict[str, LabelEncoder] = {}
         self.best_params: Dict[str, Dict] = {}
+        self.test_indices: Dict[str, List] = {}
 
     def load_data(self, dataset_name: str) -> pd.DataFrame:
         """
@@ -577,6 +578,7 @@ class ExoplanetMLPipeline:
 
             # Create splits
             X_train, X_val, X_test, y_train, y_val, y_test = self.create_splits(X, y_encoded)
+            self.test_indices[dataset_name] = X_test.index.tolist()
 
             # Handle imbalance
             X_train_balanced, y_train_balanced = self.handle_imbalance(X_train, y_train)
@@ -664,6 +666,12 @@ class ExoplanetMLPipeline:
             with open(encoder_path, 'wb') as f:
                 pickle.dump(self.label_encoders, f)
             logger.info(f"  ✓ Saved: {encoder_path}")
+
+            # Save held-out test split so evaluation uses the same rows
+            split_path = config.get_test_split_path()
+            with open(split_path, 'wb') as f:
+                pickle.dump(self.test_indices, f)
+            logger.info(f"  ✓ Saved: {split_path}")
 
             # Save best params if tuning was performed
             if self.best_params:

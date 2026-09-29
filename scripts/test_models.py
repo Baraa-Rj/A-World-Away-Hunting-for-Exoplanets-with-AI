@@ -24,6 +24,7 @@ class ModelTester:
     def __init__(self):
         self.models = {}
         self.label_encoders = {}
+        self.test_indices = {}
         self.results = {}
 
     def load_models(self):
@@ -49,6 +50,14 @@ class ModelTester:
             print(f"✓ Loaded: label_encoders.pkl")
         except Exception as e:
             print(f"✗ Error loading label encoders: {e}")
+
+        # Load the held-out test split saved by train_models_fixed.py
+        try:
+            with open('models_fixed/test_indices.pkl', 'rb') as f:
+                self.test_indices = pickle.load(f)
+            print(f"✓ Loaded: test_indices.pkl")
+        except Exception as e:
+            print(f"✗ Error loading test split: {e}")
 
     def load_and_prepare_data(self, dataset_name):
         """Load and prepare test data"""
@@ -81,18 +90,23 @@ class ModelTester:
         # Keep only numeric features
         X = X.select_dtypes(include=[np.number])
 
+        # Keep only the held-out test rows (the rest were used for training)
+        test_idx = self.test_indices[dataset_name]
+        X = X.loc[test_idx]
+        y = y.loc[test_idx]
+
         # Encode target
         le = self.label_encoders[dataset_name]
         y_encoded = le.transform(y)
 
-        print(f"  Total samples: {len(X)}")
+        print(f"  Held-out test samples: {len(X)}")
         print(f"  Features: {X.shape[1]}")
         print(f"  Classes: {len(le.classes_)}")
 
         return X, y_encoded, y, le
 
     def evaluate_model(self, dataset_name):
-        """Evaluate model on full dataset"""
+        """Evaluate model on the held-out test split"""
         print(f"\n{'='*80}")
         print(f"EVALUATING {dataset_name.upper()} MODEL")
         print(f"{'='*80}")
@@ -302,7 +316,7 @@ def main():
     print("="*80)
     print("NASA EXOPLANET MODEL TESTING & EVALUATION")
     print("="*80)
-    print(f"Testing Random Forest models on full datasets\n")
+    print(f"Testing Random Forest models on held-out test splits\n")
 
     tester = ModelTester()
 

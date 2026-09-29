@@ -28,6 +28,7 @@ class ExoplanetMLPipeline:
         self.results = {}
         self.models = {}
         self.label_encoders = {}
+        self.test_indices = {}
 
     def load_data(self, dataset_name):
         """Load cleaned dataset"""
@@ -231,6 +232,7 @@ class ExoplanetMLPipeline:
 
         # Create splits
         X_train, X_val, X_test, y_train, y_val, y_test = self.create_splits(X, y_encoded)
+        self.test_indices[dataset_name] = X_test.index.tolist()
 
         # Train model
         train_results = self.train_random_forest(X_train, y_train, X_val, y_val, dataset_name)
@@ -284,6 +286,11 @@ class ExoplanetMLPipeline:
         with open('models_fixed/label_encoders.pkl', 'wb') as f:
             pickle.dump(self.label_encoders, f)
         print(f"  ✓ Saved: models_fixed/label_encoders.pkl")
+
+        # Save held-out test split so test_models.py evaluates on the same rows
+        with open('models_fixed/test_indices.pkl', 'wb') as f:
+            pickle.dump(self.test_indices, f)
+        print(f"  ✓ Saved: models_fixed/test_indices.pkl")
 
         print("\n✅ All FIXED models saved to models_fixed/!")
 

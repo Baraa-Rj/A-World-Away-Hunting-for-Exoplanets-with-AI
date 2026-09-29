@@ -48,6 +48,7 @@ class ModelTester:
         self.label_encoders: Dict[str, LabelEncoder] = {}
         self.results: Dict[str, Dict[str, float]] = {}
         self.missing: List[str] = []
+        self.test_indices: Dict[str, List] = {}
 
     def load_models(
         self,
@@ -92,6 +93,16 @@ class ModelTester:
         except Exception as e:
             logger.error(f"✗ Error loading label encoders: {e}")
             self.missing.append(str(encoder_path))
+
+        # Load the held-out test split saved by training
+        split_path = config.get_test_split_path()
+        try:
+            with open(split_path, 'rb') as f:
+                self.test_indices = pickle.load(f)
+            logger.info(f"✓ Loaded: {split_path}")
+        except Exception as e:
+            logger.error(f"✗ Error loading test split: {e}")
+            self.missing.append(split_path)
 
     def load_and_prepare_data(
         self,
@@ -138,7 +149,7 @@ class ModelTester:
         model_type: str = 'rf'
     ) -> Dict[str, float]:
         """
-        Evaluate model on full dataset.
+        Evaluate model on the held-out test split saved by training.
 
         Args:
             dataset_name: Name of dataset
@@ -162,6 +173,13 @@ class ModelTester:
                 return {}
 
             model = self.models[model_key]
+
+            # Restrict to the held-out test rows (the rest were used for training)
+            test_idx = self.test_indices[dataset_name]
+            X = X.loc[test_idx]
+            y_original = y_original.loc[test_idx]
+            y_encoded = le.transform(y_original)
+            logger.info(f"  Held-out test samples: {len(X)}")
 
             # Make predictions
             y_pred = model.predict(X)

@@ -16,6 +16,9 @@ def small_models(tmp_path, monkeypatch):
     params = copy.deepcopy(config.HYPERPARAMETERS)
     for model_params in params.values():
         model_params["n_estimators"] = 10
+    # Single-threaded RF: with few trees, vote ties are common and threaded
+    # probability summation can break them differently between two predicts.
+    params["random_forest"]["n_jobs"] = 1
     monkeypatch.setattr(config, "HYPERPARAMETERS", params)
 
     pipeline = ExoplanetMLPipeline()
@@ -36,3 +39,14 @@ def test_train_then_evaluate_scores_every_model(small_models):
     assert len(tester.results) == 3 * len(config.MODEL_TYPES)
 
     assert test_models_refactored.main() == 0
+
+
+def test_evaluation_uses_the_held_out_test_split(small_models):
+    tester = test_models_refactored.ModelTester()
+    tester.load_models()
+    for dataset in ["cumulative", "k2pandc", "toi"]:
+        for model_type in config.MODEL_TYPES:
+            scored = tester.evaluate_model(dataset, model_type)
+            trained = small_models.results[dataset][model_type]["test"]
+            assert scored["accuracy"] == pytest.approx(trained["accuracy"])
+            assert scored["f1"] == pytest.approx(trained["f1"])

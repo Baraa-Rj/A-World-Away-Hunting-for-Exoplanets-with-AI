@@ -229,6 +229,11 @@ def get_model_file_path(dataset_name: str, model_type: str) -> str:
     return str(MODELS_FIXED_DIR / f"{dataset_name}_{model_type}.pkl")
 
 
+def get_test_split_path() -> str:
+    """Get the path of the saved held-out test split (row indices per dataset)."""
+    return str(MODELS_FIXED_DIR / "test_split_indices.pkl")
+
+
 def get_dataset_config(dataset_name: str) -> Dict[str, Any]:
     """Get the configuration for a specific dataset."""
     if dataset_name not in DATASET_CONFIGS:
