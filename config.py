@@ -157,16 +157,18 @@ LOGGING = {
     "LOG_FILE": str(BASE_DIR / "exoplanet_ml.log"),
 }
 
-# Target columns that should be excluded from features (prevent data leakage)
+# Target columns that should be excluded from features (prevent data leakage).
+# Includes the label-encoded copies of the targets written by the cleaning step.
 TARGET_COLUMNS = {
     "cumulative": [
-        "koi_disposition", "koi_pdisposition", "koi_score",
+        "koi_disposition", "koi_disposition_encoded",
+        "koi_pdisposition", "koi_pdisposition_encoded", "koi_score",
     ],
     "k2pandc": [
-        "disposition", "pl_controv_flag",
+        "disposition", "disposition_encoded", "pl_controv_flag",
     ],
     "toi": [
-        "tfopwg_disp", "toi_disposition",
+        "tfopwg_disp", "tfopwg_disp_encoded", "toi_disposition",
     ],
 }
 

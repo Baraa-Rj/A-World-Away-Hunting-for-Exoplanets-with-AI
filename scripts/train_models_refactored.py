@@ -160,7 +160,8 @@ class ExoplanetMLPipeline:
             # Keep only numeric features
             X = X.select_dtypes(include=[np.number])
 
-            # Additional check: remove any column with 'encoded' or 'disposition' in name
+            # Additional check: remove any column with 'disposition' (or, for
+            # cumulative/toi, 'score') in its name
             suspicious_cols = [
                 col for col in X.columns
                 if 'disposition' in col.lower() or
