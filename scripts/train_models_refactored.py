@@ -23,7 +23,8 @@ from sklearn.metrics import (
     f1_score, confusion_matrix, classification_report
 )
 from sklearn.preprocessing import LabelEncoder
-from sklearn.impute import SimpleImputer
+from sklearn.pipeline import Pipeline
+from sklearn.base import clone
 
 # Optional imports with error handling
 try:
@@ -40,6 +41,7 @@ except ImportError:
 
 try:
     from imblearn.over_sampling import SMOTE
+    from imblearn.pipeline import Pipeline as ImbPipeline
     HAS_SMOTE = True
 except ImportError:
     HAS_SMOTE = False
@@ -47,6 +49,7 @@ except ImportError:
 # Add parent directory to path to import config
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
+from features import prepare_features
 
 # Setup logging
 logging.basicConfig(
@@ -80,6 +83,7 @@ class ExoplanetMLPipeline:
         self.models: Dict[str, Any] = {}
         self.label_encoders: Dict[str, LabelEncoder] = {}
         self.best_params: Dict[str, Dict] = {}
+        self.test_indices: Dict[str, List] = {}
 
     def load_data(self, dataset_name: str) -> pd.DataFrame:
         """
@@ -141,64 +145,7 @@ class ExoplanetMLPipeline:
         logger.info("Preparing data...")
 
         try:
-            dataset_config = config.get_dataset_config(dataset_name)
-            target_col = dataset_config["target_column"]
-
-            # Verify target column exists
-            if target_col not in df.columns:
-                raise ValueError(f"Target column '{target_col}' not found in dataset")
-
-            # Get target before dropping
-            y = df[target_col].copy()
-
-            # Get all leakage columns for this dataset
-            leakage_cols = config.TARGET_COLUMNS.get(dataset_name, [])
-
-            # Drop ALL target and leakage columns
-            X = df.drop(columns=[col for col in leakage_cols if col in df.columns])
-
-            # Keep only numeric features
-            X = X.select_dtypes(include=[np.number])
-
-            # Additional check: remove any column with 'encoded' or 'disposition' in name
-            suspicious_cols = [
-                col for col in X.columns
-                if 'disposition' in col.lower() or
-                   (dataset_name in ['cumulative', 'toi'] and 'score' in col.lower())
-            ]
-
-            if suspicious_cols:
-                logger.warning(f"Removing suspicious columns: {suspicious_cols}")
-                X = X.drop(columns=suspicious_cols)
-
-            # Verify we have features
-            if X.shape[1] == 0:
-                raise ValueError("No features remaining after removing target columns!")
-
-            logger.info(f"\n🔍 DATA LEAKAGE CHECK:")
-            logger.info(f"  Removed columns: {[col for col in leakage_cols if col in df.columns]}")
-            logger.info(f"  Remaining features: {X.shape[1]}")
-
-            # Handle missing values
-            if X.isnull().sum().sum() > 0:
-                logger.info(f"  Imputing {X.isnull().sum().sum()} missing values...")
-                imputer = SimpleImputer(strategy='median')
-                X = pd.DataFrame(
-                    imputer.fit_transform(X),
-                    columns=X.columns,
-                    index=X.index
-                )
-
-            # Handle infinite values
-            X = X.replace([np.inf, -np.inf], np.nan)
-            if X.isnull().sum().sum() > 0:
-                logger.info(f"  Imputing {X.isnull().sum().sum()} inf values...")
-                imputer = SimpleImputer(strategy='median')
-                X = pd.DataFrame(
-                    imputer.fit_transform(X),
-                    columns=X.columns,
-                    index=X.index
-                )
+            X, y = prepare_features(df, dataset_name)
 
             # Encode target
             le = LabelEncoder()
@@ -261,54 +208,56 @@ class ExoplanetMLPipeline:
 
         return X_train, X_val, X_test, y_train, y_val, y_test
 
-    def handle_imbalance(
-        self,
-        X_train: pd.DataFrame,
-        y_train: np.ndarray
-    ) -> Tuple[pd.DataFrame, np.ndarray]:
+    def make_sampler(self, y_train: np.ndarray) -> Optional[Any]:
         """
-        Handle class imbalance using SMOTE if available.
+        Create a SMOTE sampler for class imbalance, if needed and available.
 
         Args:
-            X_train: Training features
             y_train: Training target
 
         Returns:
-            Tuple of (resampled_X, resampled_y)
+            A SMOTE instance, or None when no resampling should be done
         """
         if not config.IMBALANCE["USE_SMOTE"] or not HAS_SMOTE:
             if not HAS_SMOTE:
                 logger.warning("SMOTE not available. Install imbalanced-learn for class balancing.")
-            return X_train, y_train
+            return None
 
         # Check class distribution
         unique, counts = np.unique(y_train, return_counts=True)
         imbalance_ratio = counts.max() / counts.min()
 
         if imbalance_ratio > 3:
-            logger.info(f"Class imbalance detected (ratio: {imbalance_ratio:.1f}). Applying SMOTE...")
-
-            try:
-                smote = SMOTE(
-                    random_state=config.IMBALANCE["SMOTE_RANDOM_STATE"],
-                    k_neighbors=min(
-                        config.IMBALANCE["SMOTE_K_NEIGHBORS"],
-                        counts.min() - 1  # Can't have more neighbors than samples
-                    )
+            logger.info(f"Class imbalance detected (ratio: {imbalance_ratio:.1f}). Using SMOTE on training folds...")
+            return SMOTE(
+                random_state=config.IMBALANCE["SMOTE_RANDOM_STATE"],
+                k_neighbors=min(
+                    config.IMBALANCE["SMOTE_K_NEIGHBORS"],
+                    counts.min() - 1  # Can't have more neighbors than samples
                 )
-                X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+            )
 
-                logger.info(f"  Before SMOTE: {len(y_train)} samples")
-                logger.info(f"  After SMOTE:  {len(y_resampled)} samples")
+        logger.info("Classes relatively balanced. Skipping SMOTE.")
+        return None
 
-                return pd.DataFrame(X_resampled, columns=X_train.columns), y_resampled
+    def build_pipeline(self, model: Any, y_train: np.ndarray) -> Any:
+        """
+        Wrap a model in a pipeline that applies SMOTE only when fitting.
 
-            except Exception as e:
-                logger.warning(f"SMOTE failed: {str(e)}. Proceeding without resampling.")
-                return X_train, y_train
-        else:
-            logger.info("Classes relatively balanced. Skipping SMOTE.")
-            return X_train, y_train
+        Because resampling is a pipeline step, cross-validation and grid
+        search oversample the training folds only, never the scored fold.
+
+        Args:
+            model: Unfitted classifier
+            y_train: Target the pipeline will be fitted on
+
+        Returns:
+            Pipeline with an optional 'smote' step and a 'model' step
+        """
+        sampler = self.make_sampler(y_train)
+        if sampler is None:
+            return Pipeline([('model', model)])
+        return ImbPipeline([('smote', sampler), ('model', model)])
 
     def cross_validate_model(
         self,
@@ -402,10 +351,10 @@ class ExoplanetMLPipeline:
                 base_model.set_params(**config.HYPERPARAMETERS[model_type])
                 return base_model, {}
 
-            # Grid search
+            # Grid search (SMOTE runs inside each training fold)
             grid_search = GridSearchCV(
-                base_model,
-                param_grid,
+                self.build_pipeline(base_model, y_train),
+                {f'model__{name}': values for name, values in param_grid.items()},
                 cv=3,  # Reduced CV for speed
                 scoring='accuracy',
                 n_jobs=-1,
@@ -418,7 +367,10 @@ class ExoplanetMLPipeline:
             logger.info(f"  ✓ Best parameters: {grid_search.best_params_}")
             logger.info(f"  ✓ Best CV score: {grid_search.best_score_*100:.2f}%")
 
-            return grid_search.best_estimator_, grid_search.best_params_
+            best_params = {
+                name[len('model__'):]: value for name, value in grid_search.best_params_.items()
+            }
+            return clone(grid_search.best_estimator_.named_steps['model']), best_params
 
         except Exception as e:
             logger.error(f"Hyperparameter tuning failed: {str(e)}")
@@ -483,9 +435,11 @@ class ExoplanetMLPipeline:
                 else:
                     raise ValueError(f"Model type {model_type} not available")
 
-            # Train
+            # Train (SMOTE, if needed, is applied to the training data by the pipeline)
             logger.info("Training model...")
-            model.fit(X_train, y_train)
+            pipeline = self.build_pipeline(clone(model), y_train)
+            pipeline.fit(X_train, y_train)
+            model = pipeline.named_steps['model']
 
             # Predictions
             y_train_pred = model.predict(X_train)
@@ -515,11 +469,12 @@ class ExoplanetMLPipeline:
             model_key = f'{dataset_name}_{model_type}'
             self.models[model_key] = model
 
-            # Cross-validation
+            # Cross-validation on real rows only; SMOTE runs inside each training fold
+            y_train_val = np.concatenate([y_train, y_val])
             cv_results = self.cross_validate_model(
-                model,
+                self.build_pipeline(clone(model), y_train_val),
                 pd.concat([X_train, X_val]),
-                np.concatenate([y_train, y_val]),
+                y_train_val,
                 model_type
             )
 
@@ -634,9 +589,7 @@ class ExoplanetMLPipeline:
 
             # Create splits
             X_train, X_val, X_test, y_train, y_val, y_test = self.create_splits(X, y_encoded)
-
-            # Handle imbalance
-            X_train_balanced, y_train_balanced = self.handle_imbalance(X_train, y_train)
+            self.test_indices[dataset_name] = X_test.index.tolist()
 
             # Train each model type
             dataset_results = {}
@@ -645,8 +598,8 @@ class ExoplanetMLPipeline:
                     # Train
                     train_results = self.train_model(
                         model_type,
-                        X_train_balanced,
-                        y_train_balanced,
+                        X_train,
+                        y_train,
                         X_val,
                         y_val,
                         dataset_name,
@@ -710,7 +663,8 @@ class ExoplanetMLPipeline:
 
             # Save each model
             for name, model in self.models.items():
-                filepath = config.MODELS_FIXED_DIR / f'{name}.pkl'
+                dataset_name, model_type = name.split('_', 1)
+                filepath = config.get_model_file_path(dataset_name, model_type)
                 with open(filepath, 'wb') as f:
                     pickle.dump(model, f)
                 logger.info(f"  ✓ Saved: {filepath}")
@@ -720,6 +674,12 @@ class ExoplanetMLPipeline:
             with open(encoder_path, 'wb') as f:
                 pickle.dump(self.label_encoders, f)
             logger.info(f"  ✓ Saved: {encoder_path}")
+
+            # Save held-out test split so evaluation uses the same rows
+            split_path = config.get_test_split_path()
+            with open(split_path, 'wb') as f:
+                pickle.dump(self.test_indices, f)
+            logger.info(f"  ✓ Saved: {split_path}")
 
             # Save best params if tuning was performed
             if self.best_params:

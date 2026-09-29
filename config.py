@@ -48,24 +48,9 @@ CLEANED_FILES = {
     "toi": str(PROCESSED_DATA_DIR / "toi_cleaned.csv"),
 }
 
-# Model file paths
-MODEL_FILES = {
-    "cumulative": {
-        "rf": str(MODELS_FIXED_DIR / "cumulative_rf.pkl"),
-        "xgb": str(MODELS_FIXED_DIR / "cumulative_xgb.pkl"),
-        "lgb": str(MODELS_FIXED_DIR / "cumulative_lgb.pkl"),
-    },
-    "k2pandc": {
-        "rf": str(MODELS_FIXED_DIR / "k2pandc_rf.pkl"),
-        "xgb": str(MODELS_FIXED_DIR / "k2pandc_xgb.pkl"),
-        "lgb": str(MODELS_FIXED_DIR / "k2pandc_lgb.pkl"),
-    },
-    "toi": {
-        "rf": str(MODELS_FIXED_DIR / "toi_rf.pkl"),
-        "xgb": str(MODELS_FIXED_DIR / "toi_xgb.pkl"),
-        "lgb": str(MODELS_FIXED_DIR / "toi_lgb.pkl"),
-    },
-}
+# Model types, used both for training and for the saved file names:
+# models/models_fixed/{dataset}_{model_type}.pkl (see get_model_file_path)
+MODEL_TYPES = ["random_forest", "xgboost", "lightgbm"]
 
 # Preprocessing constants
 PREPROCESSING = {
@@ -157,16 +142,18 @@ LOGGING = {
     "LOG_FILE": str(BASE_DIR / "exoplanet_ml.log"),
 }
 
-# Target columns that should be excluded from features (prevent data leakage)
+# Target columns that should be excluded from features (prevent data leakage).
+# Includes the label-encoded copies of the targets written by the cleaning step.
 TARGET_COLUMNS = {
     "cumulative": [
-        "koi_disposition", "koi_pdisposition", "koi_score",
+        "koi_disposition", "koi_disposition_encoded",
+        "koi_pdisposition", "koi_pdisposition_encoded", "koi_score",
     ],
     "k2pandc": [
-        "disposition", "pl_controv_flag",
+        "disposition", "disposition_encoded", "pl_controv_flag",
     ],
     "toi": [
-        "tfopwg_disp", "toi_disposition",
+        "tfopwg_disp", "tfopwg_disp_encoded", "toi_disposition",
     ],
 }
 
@@ -235,11 +222,16 @@ def get_cleaned_file_path(dataset_name: str) -> str:
 
 def get_model_file_path(dataset_name: str, model_type: str) -> str:
     """Get the model file path for a given dataset and model type."""
-    if dataset_name not in MODEL_FILES:
-        raise ValueError(f"Unknown dataset: {dataset_name}. Must be one of {list(MODEL_FILES.keys())}")
-    if model_type not in MODEL_FILES[dataset_name]:
-        raise ValueError(f"Unknown model type: {model_type}. Must be one of {list(MODEL_FILES[dataset_name].keys())}")
-    return MODEL_FILES[dataset_name][model_type]
+    if dataset_name not in CLEANED_FILES:
+        raise ValueError(f"Unknown dataset: {dataset_name}. Must be one of {list(CLEANED_FILES.keys())}")
+    if model_type not in MODEL_TYPES:
+        raise ValueError(f"Unknown model type: {model_type}. Must be one of {MODEL_TYPES}")
+    return str(MODELS_FIXED_DIR / f"{dataset_name}_{model_type}.pkl")
+
+
+def get_test_split_path() -> str:
+    """Get the path of the saved held-out test split (row indices per dataset)."""
+    return str(MODELS_FIXED_DIR / "test_split_indices.pkl")
 
 
 def get_dataset_config(dataset_name: str) -> Dict[str, Any]:

@@ -20,6 +20,7 @@ from sklearn.preprocessing import LabelEncoder
 # Add parent directory to path to import config
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
+from features import prepare_features
 
 # Setup logging
 logging.basicConfig(
@@ -46,6 +47,8 @@ class ModelTester:
         self.models: Dict[str, Any] = {}
         self.label_encoders: Dict[str, LabelEncoder] = {}
         self.results: Dict[str, Dict[str, float]] = {}
+        self.missing: List[str] = []
+        self.test_indices: Dict[str, List] = {}
 
     def load_models(
         self,
@@ -55,14 +58,14 @@ class ModelTester:
         Load trained models from disk.
 
         Args:
-            model_types: List of model types to load (default: ['rf'])
+            model_types: List of model types to load (default: config.MODEL_TYPES)
         """
         logger.info("="*80)
         logger.info("LOADING TRAINED MODELS")
         logger.info("="*80)
 
         if model_types is None:
-            model_types = ['rf']
+            model_types = config.MODEL_TYPES
 
         for dataset in ['cumulative', 'k2pandc', 'toi']:
             for model_type in model_types:
@@ -70,7 +73,8 @@ class ModelTester:
                     model_path = config.get_model_file_path(dataset, model_type)
 
                     if not Path(model_path).exists():
-                        logger.warning(f"Model not found: {model_path}")
+                        logger.error(f"Model not found: {model_path}")
+                        self.missing.append(model_path)
                         continue
 
                     with open(model_path, 'rb') as f:
@@ -88,6 +92,17 @@ class ModelTester:
             logger.info(f"✓ Loaded: label_encoders.pkl")
         except Exception as e:
             logger.error(f"✗ Error loading label encoders: {e}")
+            self.missing.append(str(encoder_path))
+
+        # Load the held-out test split saved by training
+        split_path = config.get_test_split_path()
+        try:
+            with open(split_path, 'rb') as f:
+                self.test_indices = pickle.load(f)
+            logger.info(f"✓ Loaded: {split_path}")
+        except Exception as e:
+            logger.error(f"✗ Error loading test split: {e}")
+            self.missing.append(split_path)
 
     def load_and_prepare_data(
         self,
@@ -111,21 +126,8 @@ class ModelTester:
             file_path = config.get_cleaned_file_path(dataset_name)
             df = pd.read_csv(file_path)
 
-            # Get dataset config
-            dataset_config = config.get_dataset_config(dataset_name)
-            target_col = dataset_config["target_column"]
-
-            # Get target
-            y = df[target_col].copy()
-
-            # Get leakage columns
-            leakage_cols = config.TARGET_COLUMNS[dataset_name]
-
-            # Remove target and leakage columns
-            X = df.drop(columns=[col for col in leakage_cols if col in df.columns])
-
-            # Keep only numeric features
-            X = X.select_dtypes(include=[np.number])
+            # Same feature preparation as training
+            X, y = prepare_features(df, dataset_name)
 
             # Encode target
             le = self.label_encoders[dataset_name]
@@ -147,7 +149,7 @@ class ModelTester:
         model_type: str = 'rf'
     ) -> Dict[str, float]:
         """
-        Evaluate model on full dataset.
+        Evaluate model on the held-out test split saved by training.
 
         Args:
             dataset_name: Name of dataset
@@ -171,6 +173,13 @@ class ModelTester:
                 return {}
 
             model = self.models[model_key]
+
+            # Restrict to the held-out test rows (the rest were used for training)
+            test_idx = self.test_indices[dataset_name]
+            X = X.loc[test_idx]
+            y_original = y_original.loc[test_idx]
+            y_encoded = le.transform(y_original)
+            logger.info(f"  Held-out test samples: {len(X)}")
 
             # Make predictions
             y_pred = model.predict(X)
@@ -348,19 +357,22 @@ class ModelTester:
         logger.info("\n" + "="*80)
 
 
-def main(model_types: Optional[List[str]] = None):
+def main(model_types: Optional[List[str]] = None) -> int:
     """
     Main testing pipeline.
 
     Args:
-        model_types: List of model types to test (default: ['rf'])
+        model_types: List of model types to test (default: config.MODEL_TYPES)
+
+    Returns:
+        Process exit code: 0 if every model was found and evaluated, 1 otherwise
     """
     logger.info("="*80)
     logger.info("NASA EXOPLANET MODEL TESTING & EVALUATION")
     logger.info("="*80)
 
     if model_types is None:
-        model_types = ['rf']
+        model_types = config.MODEL_TYPES
 
     tester = ModelTester()
 
@@ -377,9 +389,21 @@ def main(model_types: Optional[List[str]] = None):
     # Generate summary
     tester.generate_summary_report()
 
+    expected = len(model_types) * len(['cumulative', 'k2pandc', 'toi'])
+    if tester.missing:
+        logger.error(
+            f"\n❌ Missing {len(tester.missing)} trained model file(s). "
+            f"Run scripts/train_models_refactored.py first."
+        )
+        return 1
+    if len(tester.results) < expected:
+        logger.error(f"\n❌ Only {len(tester.results)} of {expected} models were evaluated.")
+        return 1
+
     logger.info("\n✅ TESTING COMPLETE!")
     logger.info("="*80)
+    return 0
 
 
 if __name__ == "__main__":
-    main(model_types=['rf'])
+    sys.exit(main())
