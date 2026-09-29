@@ -132,6 +132,44 @@ This will:
 - Save processed data to `data/processed/`
 - Generate summary statistics
 
+### 4. Train and Evaluate Models
+```bash
+python scripts/train_models_refactored.py   # trains RF, XGBoost, LightGBM per dataset
+python scripts/test_models_refactored.py    # evaluates them on the held-out test split
+```
+
+Training saves the models, label encoders and the held-out test split to
+`models/models_fixed/`. The evaluation script exits with a non-zero status if
+any of these are missing.
+
+### 5. Run the Tests
+```bash
+pip install pytest
+python -m pytest tests
+```
+
+## Model Results
+
+Held-out test split (15% of each cleaned dataset, stratified, `random_state=42`),
+weighted precision/recall/F1. SMOTE is applied only to training folds, and
+label-derived columns (`*_disposition_encoded`, `tfopwg_disp_encoded`) are
+excluded from the features.
+
+| Dataset | Model | Accuracy | Precision | Recall | F1 |
+|---------|-------|----------|-----------|--------|----|
+| Cumulative (Kepler) | Random Forest | 72.35% | 72.91% | 72.35% | 72.58% |
+| Cumulative (Kepler) | XGBoost | 73.48% | 72.02% | 73.48% | 72.39% |
+| Cumulative (Kepler) | LightGBM | 72.15% | 70.67% | 72.15% | 71.02% |
+| K2 | Random Forest | 73.58% | 73.43% | 73.58% | 73.06% |
+| K2 | XGBoost | 81.88% | 81.69% | 81.88% | 81.52% |
+| K2 | LightGBM | 78.60% | 78.05% | 78.60% | 78.13% |
+| TOI (TESS) | Random Forest | 61.11% | 66.46% | 61.11% | 63.08% |
+| TOI (TESS) | XGBoost | 63.82% | 66.85% | 63.82% | 64.90% |
+| TOI (TESS) | LightGBM | 64.76% | 65.56% | 64.76% | 64.93% |
+
+For reference, always predicting the most common class gives about 39%
+(Cumulative), 58% (K2) and 61% (TOI) accuracy.
+
 ## Key Features
 
 ### Preprocessing Results
