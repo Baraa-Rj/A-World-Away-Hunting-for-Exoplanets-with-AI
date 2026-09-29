@@ -153,15 +153,16 @@ python -m pytest tests
 Held-out test split (15% of each cleaned dataset, stratified, `random_state=42`),
 weighted precision/recall/F1. SMOTE is applied only to training folds, and
 label-derived columns (`*_disposition_encoded`, `tfopwg_disp_encoded`) are
-excluded from the features.
+excluded from the features, as is K2's `discoverymethod_encoded` (almost all rows
+are Transit; the few Radial Velocity rows are all CONFIRMED).
 
 | Dataset | Model | Accuracy | Precision | Recall | F1 |
 |---------|-------|----------|-----------|--------|----|
 | Cumulative (Kepler) | Random Forest | 72.35% | 72.91% | 72.35% | 72.58% |
 | Cumulative (Kepler) | XGBoost | 73.48% | 72.02% | 73.48% | 72.39% |
 | Cumulative (Kepler) | LightGBM | 72.15% | 70.67% | 72.15% | 71.02% |
-| K2 | Random Forest | 73.58% | 73.43% | 73.58% | 73.06% |
-| K2 | XGBoost | 81.88% | 81.69% | 81.88% | 81.52% |
+| K2 | Random Forest | 74.24% | 74.03% | 74.24% | 73.76% |
+| K2 | XGBoost | 80.57% | 80.32% | 80.57% | 80.18% |
 | K2 | LightGBM | 78.60% | 78.05% | 78.60% | 78.13% |
 | TOI (TESS) | Random Forest | 61.11% | 66.46% | 61.11% | 63.08% |
 | TOI (TESS) | XGBoost | 63.82% | 66.85% | 63.82% | 64.90% |

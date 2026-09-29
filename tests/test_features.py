@@ -23,6 +23,12 @@ def test_no_target_derived_column_in_features(dataset):
     assert not TARGET_DERIVED & set(X.columns)
 
 
+def test_k2_discovery_method_is_not_a_feature():
+    df = pd.read_csv(config.get_cleaned_file_path("k2pandc"))
+    X, _, _ = ExoplanetMLPipeline().prepare_data(df, "k2pandc")
+    assert "discoverymethod_encoded" not in X.columns
+
+
 @pytest.mark.parametrize("dataset", DATASETS)
 def test_training_and_evaluation_prepare_identical_features(dataset):
     from test_models_refactored import ModelTester
